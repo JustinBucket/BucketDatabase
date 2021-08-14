@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using BucketDatabase.Attributes;
 using BucketDatabase.Interfaces;
+using BucketDatabase.Query;
 
 namespace BucketDatabase
 {
@@ -112,14 +113,10 @@ namespace BucketDatabase
 
         public async Task UpdateNode<T>(T entry) where T: IDbEntry
         {
-            // so we can do this or incorporate events -> when we query an entry, we can modify the object and the events will go back to the file
-            // sounds complicated for a debatable return
-            // need to find the right node based on the entries
             switch (entry.FileId.CompareTo(FileId))
             {
                 case -1:
                     // entry guid is less than current node guid, go left
-
                     if (LeftNode == null)
                     {
                         throw new ArgumentException($"object '{entry.Id}' does not exist");
@@ -133,7 +130,6 @@ namespace BucketDatabase
 
                 case 1:
                     // entry guid is greater than current node guid, go right
-
                     if (RightNode == null)
                     {
                         throw new ArgumentException($"object '{entry.Id}' does not exist");
@@ -146,69 +142,67 @@ namespace BucketDatabase
                     break;
 
                 case 0:
-
                     // found the file, load the objects, modify the right one
-
                     var nodeEntries = await ReadNode<T>();
 
                     foreach (var i in nodeEntries)
                     {
                         if (i.Id == entry.Id)
                         {
-                            
+                            // we never wrote this?
                         }
                     }
 
                     await Write<T>(entry);
                     break;
-                    
+                
+                default:
+                    throw new Exception("Oops");
             }
         }
 
-        public async Task<ICollection<T>> Query<T>(QueryParameter param) where T: IDbEntry
+        public async Task<QueryReturn<T>> Query<T>(QueryParameter param) where T: IDbEntry
         {
-            var queryResults = new List<T>();
-            
-            // break each section up
-            if (param.FileId != new Guid())
-            {
-                var fileResults = await QueryFile<T>(param);
-                if (fileResults != null)
-                {
-                    queryResults.AddRange(fileResults);
-                }
-            }
+            var queryReturn = new QueryReturn<T>();
 
             if (param.Id != null && param.Id != Guid.Empty)
             {
                 var idResult = await QueryId<T>(param);
                 if (!EqualityComparer<T>.Default.Equals(idResult, default(T)))
                 {
-                    // if the returned value is not the default of T, add the item
-                    queryResults.Add(idResult);
+                    queryReturn.IdMatch = idResult;
+                }
+            }
+
+            // break each section up
+            if (param.FileId != new Guid())
+            {
+                var result = await QueryFile<T>(param);
+                if (result != null && result.FileMatches != null && result.FileMatches.Count > 0)
+                {
+                    queryReturn.FileMatches = result.FileMatches;
                 }
             }
 
             if (param.QueryableEntries.Count > 0)
             {
-                var queryableResults = await QueryQueryable<T>(param);
-                if (queryableResults != null)
+                var result = await QueryQueryable<T>(param);
+                if (result != null && result.QueryableMatches != null && result.QueryableMatches.Count > 0)
                 {
-                    queryResults.AddRange(queryableResults);
+                    queryReturn.QueryableMatches = result.QueryableMatches;
                 }
             }
 
-            return queryResults;
+            return queryReturn;
         }
 
-        private async Task<ICollection<T>> QueryFile<T>(QueryParameter param) where T: IDbEntry
+        private async Task<QueryReturn<T>> QueryFile<T>(QueryParameter param) where T: IDbEntry
         {
             switch (param.FileId.CompareTo(FileId))
             {
                 case -1:
                     if (LeftNode != null)
                     {
-                        // param fileId is less than current root, go left
                         return await LeftNode.Query<T>(param);
                     }
                     
@@ -217,17 +211,14 @@ namespace BucketDatabase
                 case 1:
                     if (RightNode != null)
                     {
-                        // param fileId is greater than current root, go right
                         return await RightNode.Query<T>(param);
                     }
 
                     return null;
 
                 case 0:
-                    // fileId matches - now want to check the other parameters
-                    // problem is read node wants a type so the serializer can deserialize it
-                    return await ReadNode<T>();
-
+                    var nodeEntries = await ReadNode<T>();
+                    return new QueryReturn<T>() { FileMatches = nodeEntries };
 
                 default:
                     throw new Exception("this wasn't supposed to happen");
@@ -242,7 +233,6 @@ namespace BucketDatabase
 
             if (idMatchEntry != null)
             {
-                // this means the entry is in this node
                 var nodeEntries = await ReadNode<T>();
 
                 var item = nodeEntries.FirstOrDefault(x => x.Id == param.Id);
@@ -252,7 +242,6 @@ namespace BucketDatabase
 
             else
             {
-                // check the left node first
                 if (LeftNode != null)
                 {
                     var leftNodeItem = await LeftNode.QueryId<T>(param);
@@ -263,7 +252,6 @@ namespace BucketDatabase
                     }
                 }
 
-                // if we didn't return anything from the left node, check the right
                 if (RightNode != null)
                 {
                     var rightNodeItem = await RightNode.QueryId<T>(param);
@@ -278,58 +266,50 @@ namespace BucketDatabase
             }
         }
 
-        private async Task<ICollection<T>> QueryQueryable<T>(QueryParameter param) where T: IDbEntry
+        private async Task<QueryReturn<T>> QueryQueryable<T>(QueryParameter param) where T: IDbEntry
         {
-            // we have a collection of queryable params to look fhtorugh
-            // and a collection of queryables to look through as well
-            // want to base wich one to loop through based on the smaller set?
             var queryableEntries = await ReadQueryables();
-
-            ICollection<QueryableEntry> entriesForLooping;
-            ICollection<QueryableEntry> entriesForChecking;
 
             var idsToCheck = new List<Guid>();
 
-            if (queryableEntries.Count > param.QueryableEntries.Count)
+            foreach (var i in param.QueryableEntries)
             {
-                entriesForLooping = param.QueryableEntries;
-                entriesForChecking = queryableEntries;
-            }
-            else
-            {
-                entriesForLooping = queryableEntries;
-                entriesForChecking = param.QueryableEntries;
-            }
-
-            foreach (var i in entriesForLooping)
-            {
-                var queryableMatch = entriesForChecking.FirstOrDefault(x => x.PropertyName == i.PropertyName && x.PropertyValue == i.PropertyValue);
+                var queryableMatches = queryableEntries.Where(x => x.PropertyName == i.PropertyName && x.PropertyValue == i.PropertyValue).ToList();
                 
-                if (queryableMatch != null)
+                if (queryableMatches.Count > 0)
                 {
-                    idsToCheck.Add(i.Id);
+                    foreach (var j in queryableMatches)
+                    {
+                        idsToCheck.Add(j.Id);
+                    }
                 }
             }
 
-            // now read the node and check if it contains any of the items contained 
             var nodeEntries = await ReadNode<T>();
 
             var matchedEntries = nodeEntries.Where(x => idsToCheck.Contains(x.Id)).ToList();
 
-            var leftNodeEntries = await LeftNode.QueryQueryable<T>(param);
-            var rightNodeEntries = await RightNode.QueryQueryable<T>(param);
+            if (LeftNode != null)
+            {
+                var leftNodeEntries = await LeftNode.QueryQueryable<T>(param);
 
-            if (leftNodeEntries.Count > 0)
-            {
-                matchedEntries.AddRange(leftNodeEntries);
-            }
-            
-            if (rightNodeEntries.Count > 0)
-            {
-                matchedEntries.AddRange(rightNodeEntries);
+                if (leftNodeEntries.QueryableMatches.Count > 0)
+                {
+                    matchedEntries.AddRange(leftNodeEntries.QueryableMatches);
+                }
             }
 
-            return matchedEntries.ToList();
+            if (RightNode != null)
+            {
+                var rightNodeEntries = await RightNode.QueryQueryable<T>(param);
+
+                if (rightNodeEntries.QueryableMatches.Count > 0)
+                {
+                    matchedEntries.AddRange(rightNodeEntries.QueryableMatches);
+                }
+            }
+
+            return new QueryReturn<T>() { QueryableMatches = matchedEntries };
         }
 
         private async Task<ICollection<QueryableEntry>> ReadQueryables()
@@ -386,16 +366,13 @@ namespace BucketDatabase
 
             await File.AppendAllTextAsync(FilePath, objectString + Environment.NewLine);
 
-            // also pull queryable terms
             await WriteQueryTerms(entry);
 
-            // write index
             await WriteIdIndex<T>(entry);
         }
 
         private async Task WriteQueryTerms<T>(T entry) where T: IDbEntry
         {
-            // or do we need to do typeof(T).GetProperties()
             var entryProps = entry.GetType().GetProperties();
 
             var termEntries = new List<string>();
@@ -410,8 +387,6 @@ namespace BucketDatabase
                     termEntries.Add(queryTermString);
                 }
             }
-
-            // need to have update for this as well
 
             await File.AppendAllLinesAsync(QueryTermFilePath, termEntries);
         }
