@@ -15,7 +15,7 @@ namespace BucketDatabase
         
         // Constants
         // let's say ~2KB for now
-        private int MaxFileSize = 2_000;
+        private int MaxFileSize = 10_000;
         private string RightNodeName = "RightNode";
         private string LeftNodeName = "LeftNode";
 
@@ -34,9 +34,25 @@ namespace BucketDatabase
             var rigthNodePath = Path.Combine(folderPath, RightNodeName);
             var leftNodePath = Path.Combine(folderPath, LeftNodeName);
 
-            if (!Directory.Exists(folderPath))
+            // this fails if node doesn't exist
+            var nodeExists = Directory.Exists(NodeRoot);
+
+            var rootFiles = new List<string>();
+
+            if (nodeExists)
+            {
+                rootFiles = Directory.GetFiles(NodeRoot).ToList();
+            }
+
+            if (Directory.Exists(NodeRoot) == false || rootFiles.Count == 0)
             {
                 Directory.CreateDirectory(folderPath);
+            }
+            else
+            {
+                var dbFile = rootFiles.FirstOrDefault(x => x.Contains("Query") == false && x.Contains("Index") == false);
+
+                FileId = Guid.Parse(Path.GetFileNameWithoutExtension(dbFile));
             }
 
             if (Directory.Exists(rigthNodePath))
@@ -310,6 +326,25 @@ namespace BucketDatabase
             }
 
             return new QueryReturn<T>() { QueryableMatches = matchedEntries };
+        }
+
+        public async Task<ICollection<T>> ReadAllNodes<T>() where T: IDbEntry
+        {
+            var items = new List<T>();
+
+            items.AddRange(await ReadNode<T>());
+
+            if (LeftNode != null)
+            {
+                items.AddRange(await LeftNode.ReadAllNodes<T>());
+            }
+
+            if (RightNode != null)
+            {
+                items.AddRange(await RightNode.ReadAllNodes<T>());
+            }
+
+            return items;
         }
 
         private async Task<ICollection<QueryableEntry>> ReadQueryables()
