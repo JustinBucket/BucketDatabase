@@ -14,7 +14,6 @@ namespace BucketDatabase
     {
         
         // Constants
-        // let's say ~2KB for now
         private int MaxFileSize = 10_000;
         private string RightNodeName = "RightNode";
         private string LeftNodeName = "LeftNode";
@@ -27,8 +26,13 @@ namespace BucketDatabase
         private string FilePath { get { return Path.Combine(NodeRoot, $"{FileId.ToString()}.bdb"); } }
         private string QueryTermFilePath { get { return Path.Combine(NodeRoot, $"QueryTerms.bdb"); } }
         private string IdIndexFilePath { get { return Path.Combine(NodeRoot, $"Index.bdb"); } }
-        internal DatabaseNode(string folderPath)
+        internal DatabaseNode(string folderPath, int? maxNodeSize = null)
         {
+            if (maxNodeSize != null)
+            {
+                MaxFileSize = maxNodeSize.Value;
+            }
+
             NodeRoot = folderPath;
 
             var rigthNodePath = Path.Combine(folderPath, RightNodeName);

@@ -6,22 +6,19 @@ namespace BucketDatabase
 {
     public abstract class DatabaseModel
     {
-        public DatabaseModel(string dbRoot)
+        public DatabaseModel(string dbRoot, int? maxNodeSize = null)
         {
             GenerateTableFiles(dbRoot);
         }
 
-        private void GenerateTableFiles(string dbRoot)
+        private void GenerateTableFiles(string dbRoot, int? maxNodeSize = null)
         {
-            // get all properties
             var props = this.GetType().GetProperties();
 
-            // go through properties looking for tables
             foreach (var i in props)
             {
                 if (Attribute.IsDefined(i, typeof(TableAttribute)))
                 {
-                    // if property has table attribute generate the directory for it
                     var rootPath = Path.Combine(dbRoot, i.Name);
 
                     if (!Directory.Exists(rootPath))
@@ -29,8 +26,7 @@ namespace BucketDatabase
                         Directory.CreateDirectory(rootPath);
                     }
 
-                    // assign that property a new node value with the root path
-                    var node = new DatabaseNode(rootPath);
+                    var node = new DatabaseNode(rootPath, maxNodeSize);
 
                     i.SetValue(this, node);
                 }

@@ -1,6 +1,0 @@
-complete update method
-    should build out a query method first
-
-add logic operators to query parameter
-
-attach an id to queryable terms so we can pull them out of the file more easily
