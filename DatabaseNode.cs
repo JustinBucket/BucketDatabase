@@ -186,7 +186,7 @@ namespace BucketDatabase
         {
             var queryReturn = new QueryReturn<T>();
 
-            if (param.Id != null && param.Id != Guid.Empty)
+            if (param.Id != new Guid())
             {
                 var idResult = await QueryId<T>(param);
                 if (!EqualityComparer<T>.Default.Equals(idResult, default(T)))
