@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using BucketDatabase.Attributes;
 using BucketDatabase.Interfaces;
 using BucketDatabase.Query;
+using System.Text;
 
 namespace BucketDatabase
 {
@@ -14,7 +15,7 @@ namespace BucketDatabase
     {
         
         // Constants
-        private int MaxFileSize = 10_000;
+        private int MaxFileSize = 5_000;
         private string RightNodeName = "RightNode";
         private string LeftNodeName = "LeftNode";
 
@@ -38,7 +39,6 @@ namespace BucketDatabase
             var rigthNodePath = Path.Combine(folderPath, RightNodeName);
             var leftNodePath = Path.Combine(folderPath, LeftNodeName);
 
-            // this fails if node doesn't exist
             var nodeExists = Directory.Exists(NodeRoot);
 
             var rootFiles = new List<string>();
@@ -77,12 +77,10 @@ namespace BucketDatabase
 
             if (File.Exists(FilePath))
             {
-                // first check if the file is over the maximum allowed size
                 var nodeFileInfo = new FileInfo(FilePath);
 
                 if (nodeFileInfo.Length > MaxFileSize)
                 {
-                    // node already has enough information in it, write to one of the sub nodes
                     switch (entry.Id.CompareTo(FileId))
                     {
                         case -1 :
@@ -115,17 +113,13 @@ namespace BucketDatabase
                 }
                 else
                 {
-                    // overwrite the generated fileId with the one for this node
                     entry.FileId = FileId;
-
-                    // node file size is less than maximum allowed, write to it
                     await Write<T>(entry);
                 }
             }
             else
             {
                 FileId = entry.FileId;
-                // file doesn't exist, so write it
                 await Write<T>(entry);
             }
 
@@ -160,10 +154,9 @@ namespace BucketDatabase
                     break;
 
                 case 0:
-                    // so we can't rewrite the node because we won't know the type of the item
-                    // we would need to pull out the entry we need, remove that specific line from it
 
-                    var fileLines = await File.ReadAllLinesAsync(FilePath);
+                    var fileLines = await Helpers.ReadAllLinesAsync(FilePath);
+
                     var newFileLines = new List<string>();
                     
                     foreach (var i in fileLines)
@@ -180,7 +173,7 @@ namespace BucketDatabase
                     }
 
                     File.Delete(FilePath);
-                    await File.WriteAllLinesAsync(FilePath, newFileLines);
+                    await Helpers.WriteAllLinesAsync(FilePath, newFileLines);
 
                     break;
                 
@@ -344,7 +337,7 @@ namespace BucketDatabase
 
                 case 0:
 
-                    var fileLines = await File.ReadAllLinesAsync(FilePath);
+                    var fileLines = await Helpers.ReadAllLinesAsync(FilePath);
                     var newFileLines = new List<string>();
 
                     foreach (var i in fileLines)
@@ -355,7 +348,7 @@ namespace BucketDatabase
                         }
                     }
 
-                    await File.WriteAllLinesAsync(FilePath, newFileLines);
+                    await Helpers.WriteAllLinesAsync(FilePath, newFileLines);
                     break;
 
                 default:
@@ -365,7 +358,7 @@ namespace BucketDatabase
 
         private async Task<IList<QueryableEntry>> ReadQueryables()
         {
-            var fileLines = await File.ReadAllLinesAsync(QueryTermFilePath);
+            var fileLines = await Helpers.ReadAllLinesAsync(QueryTermFilePath);
 
             var queryableEntries = new List<QueryableEntry>();
 
@@ -381,7 +374,7 @@ namespace BucketDatabase
 
         private async Task<IList<IndexEntry>> ReadIndex()
         {
-            var fileLines = await File.ReadAllLinesAsync(IdIndexFilePath);
+            var fileLines = await Helpers.ReadAllLinesAsync(IdIndexFilePath);
 
             var indexEntries = new List<IndexEntry>();
 
@@ -397,7 +390,7 @@ namespace BucketDatabase
 
         private async Task<IList<T>> ReadNode<T>() where T: IDbEntry
         {
-            var fileLines = await File.ReadAllLinesAsync(FilePath);
+            var fileLines = await Helpers.ReadAllLinesAsync(FilePath);
 
             var itemCollection = new List<T>();
 
@@ -415,7 +408,7 @@ namespace BucketDatabase
         {
             var objectString = JsonSerializer.Serialize<T>(entry);
 
-            await File.AppendAllTextAsync(FilePath, objectString + Environment.NewLine);
+            await Helpers.AppendAllTextAsync(FilePath, objectString + Environment.NewLine);
 
             await WriteQueryTerms(entry);
 
@@ -439,14 +432,14 @@ namespace BucketDatabase
                 }
             }
 
-            await File.AppendAllLinesAsync(QueryTermFilePath, termEntries);
+            await Helpers.AppendAllLinesAsync(QueryTermFilePath, termEntries);
         }
 
         private async Task WriteIdIndex<T>(T entry) where T: IDbEntry
         {
             var indexEntry = new IndexEntry(entry.Id);
             var indexEntryString = JsonSerializer.Serialize(indexEntry);
-            await File.AppendAllTextAsync(IdIndexFilePath, indexEntryString + Environment.NewLine);
+            await Helpers.AppendAllTextAsync(IdIndexFilePath, indexEntryString + Environment.NewLine);
         }
     }
 }
