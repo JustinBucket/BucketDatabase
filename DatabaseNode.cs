@@ -136,7 +136,6 @@ namespace BucketDatabase
             switch (entry.FileId.CompareTo(FileId))
             {
                 case -1:
-                    // entry guid is less than current node guid, go left
                     if (LeftNode == null)
                     {
                         throw new ArgumentException($"object '{entry.Id}' does not exist");
@@ -149,7 +148,6 @@ namespace BucketDatabase
                     break;
 
                 case 1:
-                    // entry guid is greater than current node guid, go right
                     if (RightNode == null)
                     {
                         throw new ArgumentException($"object '{entry.Id}' does not exist");
@@ -162,18 +160,28 @@ namespace BucketDatabase
                     break;
 
                 case 0:
-                    // found the file, load the objects, modify the right one
-                    var nodeEntries = await ReadNode<T>();
+                    // so we can't rewrite the node because we won't know the type of the item
+                    // we would need to pull out the entry we need, remove that specific line from it
 
-                    foreach (var i in nodeEntries)
+                    var fileLines = await File.ReadAllLinesAsync(FilePath);
+                    var newFileLines = new List<string>();
+                    
+                    foreach (var i in fileLines)
                     {
-                        if (i.Id == entry.Id)
+                        if (i.Contains(entry.Id.ToString()))
                         {
-                            // we never wrote this?
+                            var objectString = JsonSerializer.Serialize<T>(entry);
+                            newFileLines.Add(objectString);
+                        }
+                        else
+                        {
+                            newFileLines.Add(i);
                         }
                     }
 
-                    await Write<T>(entry);
+                    File.Delete(FilePath);
+                    await File.WriteAllLinesAsync(FilePath, newFileLines);
+
                     break;
                 
                 default:
@@ -194,55 +202,16 @@ namespace BucketDatabase
                 }
             }
 
-            // break each section up
-            if (param.FileId != new Guid())
-            {
-                var result = await QueryFile<T>(param);
-                if (result != null && result.FileMatches != null && result.FileMatches.Count > 0)
-                {
-                    queryReturn.FileMatches = result.FileMatches;
-                }
-            }
-
-            if (param.QueryableEntries.Count > 0)
+            if (param.QueryableEntries.Count() > 0)
             {
                 var result = await QueryQueryable<T>(param);
-                if (result != null && result.QueryableMatches != null && result.QueryableMatches.Count > 0)
+                if (result != null && result.QueryableMatches != null && result.QueryableMatches.Count() > 0)
                 {
                     queryReturn.QueryableMatches = result.QueryableMatches;
                 }
             }
 
             return queryReturn;
-        }
-
-        private async Task<QueryReturn<T>> QueryFile<T>(QueryParameter param) where T: IDbEntry
-        {
-            switch (param.FileId.CompareTo(FileId))
-            {
-                case -1:
-                    if (LeftNode != null)
-                    {
-                        return await LeftNode.Query<T>(param);
-                    }
-                    
-                    return null;
-
-                case 1:
-                    if (RightNode != null)
-                    {
-                        return await RightNode.Query<T>(param);
-                    }
-
-                    return null;
-
-                case 0:
-                    var nodeEntries = await ReadNode<T>();
-                    return new QueryReturn<T>() { FileMatches = nodeEntries };
-
-                default:
-                    throw new Exception("this wasn't supposed to happen");
-            }
         }
 
         private async Task<T> QueryId<T>(QueryParameter param) where T: IDbEntry
@@ -294,7 +263,7 @@ namespace BucketDatabase
 
             foreach (var i in param.QueryableEntries)
             {
-                var queryableMatches = queryableEntries.Where(x => x.PropertyName == i.PropertyName && x.PropertyValue == i.PropertyValue).ToList();
+                var queryableMatches = queryableEntries.Where(x => x.PropertyName.ToLower() == i.PropertyName.ToLower() && x.PropertyValue.ToLower() == i.PropertyValue.ToLower()).ToList();
                 
                 if (queryableMatches.Count > 0)
                 {
@@ -313,7 +282,7 @@ namespace BucketDatabase
             {
                 var leftNodeEntries = await LeftNode.QueryQueryable<T>(param);
 
-                if (leftNodeEntries.QueryableMatches.Count > 0)
+                if (leftNodeEntries.QueryableMatches.Count() > 0)
                 {
                     matchedEntries.AddRange(leftNodeEntries.QueryableMatches);
                 }
@@ -323,7 +292,7 @@ namespace BucketDatabase
             {
                 var rightNodeEntries = await RightNode.QueryQueryable<T>(param);
 
-                if (rightNodeEntries.QueryableMatches.Count > 0)
+                if (rightNodeEntries.QueryableMatches.Count() > 0)
                 {
                     matchedEntries.AddRange(rightNodeEntries.QueryableMatches);
                 }
@@ -332,7 +301,7 @@ namespace BucketDatabase
             return new QueryReturn<T>() { QueryableMatches = matchedEntries };
         }
 
-        public async Task<ICollection<T>> ReadAllNodes<T>() where T: IDbEntry
+        public async Task<IList<T>> ReadAllNodes<T>() where T: IDbEntry
         {
             var items = new List<T>();
 
@@ -351,7 +320,7 @@ namespace BucketDatabase
             return items;
         }
 
-        private async Task<ICollection<QueryableEntry>> ReadQueryables()
+        private async Task<IList<QueryableEntry>> ReadQueryables()
         {
             var fileLines = await File.ReadAllLinesAsync(QueryTermFilePath);
 
@@ -367,7 +336,7 @@ namespace BucketDatabase
             return queryableEntries;
         }
 
-        private async Task<ICollection<IndexEntry>> ReadIndex()
+        private async Task<IList<IndexEntry>> ReadIndex()
         {
             var fileLines = await File.ReadAllLinesAsync(IdIndexFilePath);
 
@@ -383,7 +352,7 @@ namespace BucketDatabase
             return indexEntries;
         }
 
-        private async Task<List<T>> ReadNode<T>() where T: IDbEntry
+        private async Task<IList<T>> ReadNode<T>() where T: IDbEntry
         {
             var fileLines = await File.ReadAllLinesAsync(FilePath);
 

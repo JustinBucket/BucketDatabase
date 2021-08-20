@@ -5,10 +5,13 @@ namespace BucketDatabase.Query
 {
     public class QueryParameter
     {
-        // would be nice to have and/or capabilities
-        // let's do it globally first
-        public Guid FileId { get; set; }
         public Guid Id { get; set; }
-        public List<QueryableEntry> QueryableEntries { get; set; } = new List<QueryableEntry>();
+        public IList<QueryableEntry> QueryableEntries { get; set; } = new List<QueryableEntry>();
+        public QueryParameter() { }
+        public QueryParameter(Guid id, IList<QueryableEntry> entries)
+        {
+            Id = id;
+            QueryableEntries = entries;
+        }
     }
 }

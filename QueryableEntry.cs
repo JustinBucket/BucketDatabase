@@ -13,6 +13,11 @@ namespace BucketDatabase
             PropertyValue = propValue;
             Id = id;
         }
+        public QueryableEntry(string propName, string propValue)
+        {
+            PropertyName = propName;
+            PropertyValue = propValue;
+        }
         public QueryableEntry() { }
     }
 }
