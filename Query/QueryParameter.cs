@@ -13,5 +13,13 @@ namespace BucketDatabase.Query
             Id = id;
             QueryableEntries = entries;
         }
+        public QueryParameter(Guid id)
+        {
+            Id = id;
+        }
+        public QueryParameter(IList<QueryableEntry> entries)
+        {
+            QueryableEntries = entries;
+        }
     }
 }

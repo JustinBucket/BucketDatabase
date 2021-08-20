@@ -320,6 +320,49 @@ namespace BucketDatabase
             return items;
         }
 
+        public async Task DeleteEntry<T>(T entry) where T: IDbEntry
+        {
+            switch (FileId.CompareTo(entry.FileId))
+            {
+                case -1:
+                    if (LeftNode == null)
+                    {
+                        throw new ArgumentException("entry does not exist");
+                    }
+                    await LeftNode.DeleteEntry(entry);
+                    break;
+
+                case 1:
+                    
+                    if (RightNode == null)
+                    {
+                        throw new ArgumentException("entry does not exist");
+                    }
+                    
+                    await RightNode.DeleteEntry(entry);
+                    break;
+
+                case 0:
+
+                    var fileLines = await File.ReadAllLinesAsync(FilePath);
+                    var newFileLines = new List<string>();
+
+                    foreach (var i in fileLines)
+                    {
+                        if (!i.Contains(entry.Id.ToString()))
+                        {
+                            newFileLines.Add(i);
+                        }
+                    }
+
+                    await File.WriteAllLinesAsync(FilePath, newFileLines);
+                    break;
+
+                default:
+                    throw new Exception("this shouldn't have happened");
+            }
+        }
+
         private async Task<IList<QueryableEntry>> ReadQueryables()
         {
             var fileLines = await File.ReadAllLinesAsync(QueryTermFilePath);
