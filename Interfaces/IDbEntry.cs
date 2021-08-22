@@ -4,7 +4,7 @@ using System.ComponentModel;
 
 namespace BucketDatabase.Interfaces
 {
-    public interface IDbEntry : INotifyPropertyChanged, INotifyCollectionChanged
+    public interface IDbEntry
     {
         Guid Id { get; set; }
         Guid FileId { get; set; }

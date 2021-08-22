@@ -70,7 +70,7 @@ namespace BucketDatabase
             }
         }
 
-        public async Task WriteToNode<T>(T entry) where T: IDbEntry
+        public async Task WriteToNode(IDbEntry entry)
         {
             entry.Id = Guid.NewGuid();
             entry.FileId = Guid.NewGuid();
@@ -91,7 +91,7 @@ namespace BucketDatabase
                                 LeftNode = new DatabaseNode(nodePath);
                             }
 
-                            await LeftNode.WriteToNode<T>(entry);
+                            await LeftNode.WriteToNode(entry);
 
                             break;
 
@@ -103,7 +103,7 @@ namespace BucketDatabase
                                 RightNode = new DatabaseNode(nodePath);
                             }
 
-                            await RightNode.WriteToNode<T>(entry);
+                            await RightNode.WriteToNode(entry);
 
                             break;
 
@@ -114,18 +114,18 @@ namespace BucketDatabase
                 else
                 {
                     entry.FileId = FileId;
-                    await Write<T>(entry);
+                    await Write(entry);
                 }
             }
             else
             {
                 FileId = entry.FileId;
-                await Write<T>(entry);
+                await Write(entry);
             }
 
         }
 
-        public async Task UpdateNode<T>(T entry) where T: IDbEntry
+        public async Task UpdateNode(IDbEntry entry)
         {
             switch (entry.FileId.CompareTo(FileId))
             {
@@ -136,7 +136,7 @@ namespace BucketDatabase
                     }
                     else
                     {
-                        await LeftNode.UpdateNode<T>(entry);
+                        await LeftNode.UpdateNode(entry);
                     }
 
                     break;
@@ -148,7 +148,7 @@ namespace BucketDatabase
                     }
                     else
                     {
-                        await RightNode.UpdateNode<T>(entry);
+                        await RightNode.UpdateNode(entry);
                     }
 
                     break;
@@ -163,7 +163,7 @@ namespace BucketDatabase
                     {
                         if (i.Contains(entry.Id.ToString()))
                         {
-                            var objectString = JsonSerializer.Serialize<T>(entry);
+                            var objectString = JsonSerializer.Serialize(entry, entry.GetType());
                             newFileLines.Add(objectString);
                         }
                         else
@@ -313,7 +313,7 @@ namespace BucketDatabase
             return items;
         }
 
-        public async Task DeleteEntry<T>(T entry) where T: IDbEntry
+        public async Task DeleteEntry(IDbEntry entry)
         {
             switch (FileId.CompareTo(entry.FileId))
             {
@@ -404,18 +404,18 @@ namespace BucketDatabase
             return itemCollection;
         }
 
-        private async Task Write<T>(T entry) where T: IDbEntry
+        private async Task Write(IDbEntry entry)
         {
-            var objectString = JsonSerializer.Serialize<T>(entry);
+            var objectString = JsonSerializer.Serialize(entry, entry.GetType());
 
             await Helpers.AppendAllTextAsync(FilePath, objectString + Environment.NewLine);
 
             await WriteQueryTerms(entry);
 
-            await WriteIdIndex<T>(entry);
+            await WriteIdIndex(entry);
         }
 
-        private async Task WriteQueryTerms<T>(T entry) where T: IDbEntry
+        private async Task WriteQueryTerms(IDbEntry entry)
         {
             var entryProps = entry.GetType().GetProperties();
 
@@ -435,7 +435,7 @@ namespace BucketDatabase
             await Helpers.AppendAllLinesAsync(QueryTermFilePath, termEntries);
         }
 
-        private async Task WriteIdIndex<T>(T entry) where T: IDbEntry
+        private async Task WriteIdIndex(IDbEntry entry)
         {
             var indexEntry = new IndexEntry(entry.Id);
             var indexEntryString = JsonSerializer.Serialize(indexEntry);
