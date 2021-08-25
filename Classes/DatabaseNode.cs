@@ -2,12 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
 using System.Threading.Tasks;
 using BucketDatabase.Attributes;
-using BucketDatabase.Interfaces;
-using BucketDatabase.Query;
 using System.Text;
+using Newtonsoft.Json;
 
 namespace BucketDatabase
 {
@@ -27,7 +25,7 @@ namespace BucketDatabase
         private string FilePath { get { return Path.Combine(NodeRoot, $"{FileId.ToString()}.bdb"); } }
         private string QueryTermFilePath { get { return Path.Combine(NodeRoot, $"QueryTerms.bdb"); } }
         private string IdIndexFilePath { get { return Path.Combine(NodeRoot, $"Index.bdb"); } }
-        internal DatabaseNode(string folderPath, int? maxNodeSize = null)
+        public DatabaseNode(string folderPath, int? maxNodeSize = null)
         {
             if (maxNodeSize != null)
             {
@@ -70,10 +68,16 @@ namespace BucketDatabase
             }
         }
 
-        public async Task WriteToNode(IDbEntry entry)
+        public async Task WriteEntry(IDbEntry entry)
         {
+            if (entry.Id != Guid.Empty)
+            {
+                throw new ArgumentException("entry should not have the id properties pre-populated, if these are pre-existing entries, please use the update method");
+            }
+
             entry.Id = Guid.NewGuid();
-            entry.FileId = Guid.NewGuid();
+
+            entry.CascadeEntryIds();
 
             if (File.Exists(FilePath))
             {
@@ -91,7 +95,7 @@ namespace BucketDatabase
                                 LeftNode = new DatabaseNode(nodePath);
                             }
 
-                            await LeftNode.WriteToNode(entry);
+                            await LeftNode.WriteEntry(entry);
 
                             break;
 
@@ -103,7 +107,7 @@ namespace BucketDatabase
                                 RightNode = new DatabaseNode(nodePath);
                             }
 
-                            await RightNode.WriteToNode(entry);
+                            await RightNode.WriteEntry(entry);
 
                             break;
 
@@ -113,186 +117,230 @@ namespace BucketDatabase
                 }
                 else
                 {
-                    entry.FileId = FileId;
                     await Write(entry);
                 }
             }
             else
             {
-                FileId = entry.FileId;
+                FileId = Guid.NewGuid();
                 await Write(entry);
             }
-
         }
 
-        public async Task UpdateNode(IDbEntry entry)
+        public async Task UpdateEntry(IDbEntry entry)
         {
-            switch (entry.FileId.CompareTo(FileId))
+            // we're comparing the entry's ID to the file ID
+            // but we want to do this after we've checked if this file contains the id
+
+            var indexEntries = await ReadIndex();
+
+            var matchedEntry = indexEntries.FirstOrDefault(x => x.Id == entry.Id);
+
+            if (matchedEntry != null)
             {
-                case -1:
-                    if (LeftNode == null)
-                    {
-                        throw new ArgumentException($"object '{entry.Id}' does not exist");
-                    }
-                    else
-                    {
-                        await LeftNode.UpdateNode(entry);
-                    }
+                var fileLines = await Helpers.ReadAllLinesAsync(FilePath);
 
-                    break;
-
-                case 1:
-                    if (RightNode == null)
-                    {
-                        throw new ArgumentException($"object '{entry.Id}' does not exist");
-                    }
-                    else
-                    {
-                        await RightNode.UpdateNode(entry);
-                    }
-
-                    break;
-
-                case 0:
-
-                    var fileLines = await Helpers.ReadAllLinesAsync(FilePath);
-
-                    var newFileLines = new List<string>();
-                    
-                    foreach (var i in fileLines)
-                    {
-                        if (i.Contains(entry.Id.ToString()))
-                        {
-                            var objectString = JsonSerializer.Serialize(entry, entry.GetType());
-                            newFileLines.Add(objectString);
-                        }
-                        else
-                        {
-                            newFileLines.Add(i);
-                        }
-                    }
-
-                    File.Delete(FilePath);
-                    await Helpers.WriteAllLinesAsync(FilePath, newFileLines);
-
-                    break;
+                var newFileLines = new List<string>();
                 
-                default:
-                    throw new Exception("Oops");
-            }
-        }
-
-        public async Task<QueryReturn<T>> Query<T>(QueryParameter param) where T: IDbEntry
-        {
-            var queryReturn = new QueryReturn<T>();
-
-            if (param.Id != new Guid())
-            {
-                var idResult = await QueryId<T>(param);
-                if (!EqualityComparer<T>.Default.Equals(idResult, default(T)))
+                foreach (var i in fileLines)
                 {
-                    queryReturn.IdMatch = idResult;
+                    if (i.Contains(entry.Id.ToString()))
+                    {
+                        var objectString = JsonConvert.SerializeObject(entry, entry.GetType(), new JsonSerializerSettings());
+                        newFileLines.Add(objectString);
+                    }
+                    else
+                    {
+                        newFileLines.Add(i);
+                    }
                 }
-            }
 
-            if (param.QueryableEntries.Count() > 0)
-            {
-                var result = await QueryQueryable<T>(param);
-                if (result != null && result.QueryableMatches != null && result.QueryableMatches.Count() > 0)
-                {
-                    queryReturn.QueryableMatches = result.QueryableMatches;
-                }
-            }
-
-            return queryReturn;
-        }
-
-        private async Task<T> QueryId<T>(QueryParameter param) where T: IDbEntry
-        {
-            var idItems = await ReadIndex();
-
-            var idMatchEntry = idItems.FirstOrDefault(x => x.Id == param.Id);
-
-            if (idMatchEntry != null)
-            {
-                var nodeEntries = await ReadNode<T>();
-
-                var item = nodeEntries.FirstOrDefault(x => x.Id == param.Id);
-
-                return item;
+                // the below is possibly an issue as it's not async
+                File.Delete(FilePath);
+                await Helpers.WriteAllLinesAsync(FilePath, newFileLines);
             }
 
             else
             {
-                if (LeftNode != null)
+                switch (entry.Id.CompareTo(FileId))
                 {
-                    var leftNodeItem = await LeftNode.QueryId<T>(param);
-                    
-                    if (leftNodeItem != null)
-                    {
-                        return leftNodeItem;
-                    }
-                }
+                    case -1:
+                        if (LeftNode == null)
+                        {
+                            throw new ArgumentException($"object '{entry.Id}' does not exist");
+                        }
+                        else
+                        {
+                            await LeftNode.UpdateEntry(entry);
+                        }
 
-                if (RightNode != null)
-                {
-                    var rightNodeItem = await RightNode.QueryId<T>(param);
-                    
-                    if (rightNodeItem != null)
-                    {
-                        return rightNodeItem;
-                    }
-                }
+                        break;
 
-                return default(T);
+                    case 1:
+                        if (RightNode == null)
+                        {
+                            throw new ArgumentException($"object '{entry.Id}' does not exist");
+                        }
+                        else
+                        {
+                            await RightNode.UpdateEntry(entry);
+                        }
+
+                        break;
+
+                    
+                    
+                    default:
+                        throw new Exception("Oops");
+                }
             }
         }
 
-        private async Task<QueryReturn<T>> QueryQueryable<T>(QueryParameter param) where T: IDbEntry
+        public async Task<T> Query<T>(Guid entryId) where T: IDbEntry
         {
-            var queryableEntries = await ReadQueryables();
+            var nodeLines = await Helpers.ReadAllLinesAsync(FilePath);
 
-            var idsToCheck = new List<Guid>();
-
-            foreach (var i in param.QueryableEntries)
+            foreach (var i in nodeLines)
             {
-                var queryableMatches = queryableEntries.Where(x => x.PropertyName.ToLower() == i.PropertyName.ToLower() && x.PropertyValue.ToLower() == i.PropertyValue.ToLower()).ToList();
-                
-                if (queryableMatches.Count > 0)
+                // if the line contains the id -> pull it apart
+                if (i.Contains(entryId.ToString()))
                 {
-                    foreach (var j in queryableMatches)
-                    {
-                        idsToCheck.Add(j.Id);
-                    }
+                    return ParseEntry<T>(i, entryId);
                 }
             }
 
-            var nodeEntries = await ReadNode<T>();
-
-            var matchedEntries = nodeEntries.Where(x => idsToCheck.Contains(x.Id)).ToList();
-
             if (LeftNode != null)
             {
-                var leftNodeEntries = await LeftNode.QueryQueryable<T>(param);
+                var leftNodeEntry = await LeftNode.Query<T>(entryId);
 
-                if (leftNodeEntries.QueryableMatches.Count() > 0)
+                if (leftNodeEntry != null)
                 {
-                    matchedEntries.AddRange(leftNodeEntries.QueryableMatches);
+                    return leftNodeEntry;
                 }
             }
 
             if (RightNode != null)
             {
-                var rightNodeEntries = await RightNode.QueryQueryable<T>(param);
+                var rightNodeEntry = await RightNode.Query<T>(entryId);
 
-                if (rightNodeEntries.QueryableMatches.Count() > 0)
+                if (rightNodeEntry != null)
                 {
-                    matchedEntries.AddRange(rightNodeEntries.QueryableMatches);
+                    return rightNodeEntry;
                 }
             }
 
-            return new QueryReturn<T>() { QueryableMatches = matchedEntries };
+            return default(T);
         }
+
+        private T ParseEntry<T>(string line, Guid entryId) where T: IDbEntry
+        {
+            // we are assuming the id is at the start of the string
+            
+            var idIndex = line.IndexOf(entryId.ToString());
+
+            var entryStartIndex = ParseObjectStartIndex(line, idIndex);
+
+            var entryEndIndex = ParseObjectEndIndex(line, entryStartIndex);
+
+            // the end of the string is relative to the start?
+            var entryString = line.Substring(entryStartIndex, entryEndIndex + 1 - entryStartIndex);
+
+            return JsonConvert.DeserializeObject<T>(entryString);
+        }
+
+        private int ParseObjectStartIndex(string line, int idIndex)
+        {
+            var openParIndices = new List<int>();
+            var indicesIndex = -1;
+
+            for (int i = 0; i < idIndex; i++)
+            {
+                if (line[i] == '{')
+                {
+                    openParIndices.Add(i);
+                    indicesIndex++;
+                }
+
+                if (line[i] == '}')
+                {
+                    indicesIndex--;
+                }
+            }
+
+            return openParIndices[indicesIndex];
+        }
+
+        private int ParseObjectEndIndex(string line, int entryStartIndex)
+        {
+            var openCount = 0;
+            var entryEndIndex = 0;
+
+            for (int i = entryStartIndex; i < line.Length; i++)
+            {
+                if (line[i] == '{')
+                {
+                    openCount++;
+                }
+
+                if (line[i] == '}')
+                {
+                    openCount--;
+                    if (openCount == 0)
+                    {
+                        entryEndIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            return entryEndIndex;
+        }
+
+        // private async Task<QueryReturn<T>> QueryQueryable<T>(QueryParameter param) where T: IDbEntry
+        // {
+        //     var queryableEntries = await ReadQueryables();
+
+        //     var idsToCheck = new List<Guid>();
+
+        //     foreach (var i in param.QueryableEntries)
+        //     {
+        //         var queryableMatches = queryableEntries.Where(x => x.PropertyName.ToLower() == i.PropertyName.ToLower() && x.PropertyValue.ToLower() == i.PropertyValue.ToLower()).ToList();
+                
+        //         if (queryableMatches.Count > 0)
+        //         {
+        //             foreach (var j in queryableMatches)
+        //             {
+        //                 idsToCheck.Add(j.Id);
+        //             }
+        //         }
+        //     }
+
+        //     var nodeEntries = await ReadNode<T>();
+
+        //     var matchedEntries = nodeEntries.Where(x => idsToCheck.Contains(x.Id)).ToList();
+
+        //     if (LeftNode != null)
+        //     {
+        //         var leftNodeEntries = await LeftNode.QueryQueryable<T>(param);
+
+        //         if (leftNodeEntries.QueryableMatches.Count() > 0)
+        //         {
+        //             matchedEntries.AddRange(leftNodeEntries.QueryableMatches);
+        //         }
+        //     }
+
+        //     if (RightNode != null)
+        //     {
+        //         var rightNodeEntries = await RightNode.QueryQueryable<T>(param);
+
+        //         if (rightNodeEntries.QueryableMatches.Count() > 0)
+        //         {
+        //             matchedEntries.AddRange(rightNodeEntries.QueryableMatches);
+        //         }
+        //     }
+
+        //     return new QueryReturn<T>() { QueryableMatches = matchedEntries };
+        // }
 
         public async Task<IList<T>> ReadAllNodes<T>() where T: IDbEntry
         {
@@ -315,7 +363,7 @@ namespace BucketDatabase
 
         public async Task DeleteEntry(IDbEntry entry)
         {
-            switch (FileId.CompareTo(entry.FileId))
+            switch (FileId.CompareTo(entry.Id))
             {
                 case -1:
                     if (LeftNode == null)
@@ -364,7 +412,7 @@ namespace BucketDatabase
 
             foreach (var i in fileLines)
             {
-                var entry = JsonSerializer.Deserialize<QueryableEntry>(i);
+                var entry = JsonConvert.DeserializeObject<QueryableEntry>(i);
 
                 queryableEntries.Add(entry);
             }
@@ -380,7 +428,7 @@ namespace BucketDatabase
 
             foreach (var i in fileLines)
             {
-                var entry = JsonSerializer.Deserialize<IndexEntry>(i);
+                var entry = JsonConvert.DeserializeObject<IndexEntry>(i);
 
                 indexEntries.Add(entry);
             }
@@ -396,7 +444,7 @@ namespace BucketDatabase
 
             foreach (var i in fileLines)
             {
-                var entry = JsonSerializer.Deserialize<T>(i);
+                var entry = JsonConvert.DeserializeObject<T>(i);
 
                 itemCollection.Add(entry);
             }
@@ -406,7 +454,10 @@ namespace BucketDatabase
 
         private async Task Write(IDbEntry entry)
         {
-            var objectString = JsonSerializer.Serialize(entry, entry.GetType());
+            var jsonOptions = new JsonSerializerSettings();
+            jsonOptions.ReferenceLoopHandling = ReferenceLoopHandling.Ignore;
+
+            var objectString = JsonConvert.SerializeObject(entry, entry.GetType(), jsonOptions);
 
             await Helpers.AppendAllTextAsync(FilePath, objectString + Environment.NewLine);
 
@@ -427,7 +478,7 @@ namespace BucketDatabase
                 if (attributeDefined)
                 {
                     var queryEntry = new QueryableEntry(i.Name, i.GetValue(entry) == null ? "" : i.GetValue(entry).ToString(), entry.Id);
-                    var queryTermString = JsonSerializer.Serialize(queryEntry);
+                    var queryTermString = JsonConvert.SerializeObject(queryEntry);
                     termEntries.Add(queryTermString);
                 }
             }
@@ -438,7 +489,7 @@ namespace BucketDatabase
         private async Task WriteIdIndex(IDbEntry entry)
         {
             var indexEntry = new IndexEntry(entry.Id);
-            var indexEntryString = JsonSerializer.Serialize(indexEntry);
+            var indexEntryString = JsonConvert.SerializeObject(indexEntry);
             await Helpers.AppendAllTextAsync(IdIndexFilePath, indexEntryString + Environment.NewLine);
         }
     }

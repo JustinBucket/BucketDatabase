@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -75,5 +76,42 @@ namespace BucketDatabase
 
             await WriteAllLinesAsync(filePath, fileLines);
         }
+
+        public static void CascadeEntryIds(this IDbEntry entry)
+        {
+            var props = entry.GetType().GetProperties();
+
+            foreach (var i in props)
+            {
+                if (i.PropertyType == typeof(IDbEntry))
+                {
+                    // get the value of the property
+                    var propertyValue = i.GetValue(entry) as IDbEntry;
+
+                    if (propertyValue != null)
+                    {
+                        propertyValue.Id = Guid.NewGuid();
+                        // now want to call that property's cascade method
+                        propertyValue.CascadeEntryIds();
+                    }
+                    
+                }
+
+                else if (typeof(IEnumerable).IsAssignableFrom(i.PropertyType))
+                {
+                    var propertyValue = i.GetValue(entry) as IEnumerable<IDbEntry>;
+
+                    if (propertyValue != null)
+                    {
+                        foreach (var collectionEntry in propertyValue)
+                        {
+                            collectionEntry.Id = Guid.NewGuid();
+                            collectionEntry.CascadeEntryIds();
+                        }
+                    }
+                }
+            }
+        }
+
     }
 }
