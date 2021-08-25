@@ -26,7 +26,7 @@ namespace BucketDatabase
             return fileLines.ToList();
         }
 
-        public async static Task WriteAllLinesAsync(string filePath, List<string> fileLines)
+        public async static Task WriteAllLinesAsync(string filePath, List<string> fileLines, bool overwrite = false)
         {
             var enco = new ASCIIEncoding();
 
@@ -40,6 +40,12 @@ namespace BucketDatabase
                 {
                     SourceStream.SetLength(0);
                 }
+
+                if (overwrite)
+                {
+                    SourceStream.SetLength(0);
+                }
+
                 SourceStream.Seek(0, SeekOrigin.Begin);
                 await SourceStream.WriteAsync(result, 0, result.Length);
             }
@@ -107,6 +113,40 @@ namespace BucketDatabase
                         {
                             collectionEntry.Id = Guid.NewGuid();
                             collectionEntry.CascadeEntryIds();
+                        }
+                    }
+                }
+            }
+        }
+
+        public static void CascadeFileIds(this IDbEntry entry)
+        {
+            var props = entry.GetType().GetProperties();
+
+            foreach (var i in props)
+            {
+                if (i.PropertyType == typeof(IDbEntry))
+                {
+                    var propertyValue = i.GetValue(entry) as IDbEntry;
+
+                    if (propertyValue != null)
+                    {
+                        propertyValue.FileId = entry.FileId;
+                        propertyValue.CascadeFileIds();
+                    }
+                    
+                }
+
+                else if (typeof(IEnumerable).IsAssignableFrom(i.PropertyType))
+                {
+                    var propertyValue = i.GetValue(entry) as IEnumerable<IDbEntry>;
+
+                    if (propertyValue != null)
+                    {
+                        foreach (var collectionEntry in propertyValue)
+                        {
+                            collectionEntry.FileId = entry.FileId;
+                            collectionEntry.CascadeFileIds();
                         }
                     }
                 }

@@ -7,5 +7,6 @@ namespace BucketDatabase
     public interface IDbEntry
     {
         Guid Id { get; set; }
+        Guid FileId { get; set; }
     }
 }

@@ -117,82 +117,74 @@ namespace BucketDatabase
                 }
                 else
                 {
+                    entry.FileId = FileId;
+                    entry.CascadeFileIds();
                     await Write(entry);
                 }
             }
             else
             {
                 FileId = Guid.NewGuid();
+                entry.FileId = FileId;
+                entry.CascadeFileIds();
                 await Write(entry);
             }
         }
 
         public async Task UpdateEntry(IDbEntry entry)
         {
-            // we're comparing the entry's ID to the file ID
-            // but we want to do this after we've checked if this file contains the id
-
-            var indexEntries = await ReadIndex();
-
-            var matchedEntry = indexEntries.FirstOrDefault(x => x.Id == entry.Id);
-
-            if (matchedEntry != null)
+            switch (entry.FileId.CompareTo(FileId))
             {
-                var fileLines = await Helpers.ReadAllLinesAsync(FilePath);
-
-                var newFileLines = new List<string>();
-                
-                foreach (var i in fileLines)
-                {
-                    if (i.Contains(entry.Id.ToString()))
+                case -1:
+                    if (LeftNode == null)
                     {
-                        var objectString = JsonConvert.SerializeObject(entry, entry.GetType(), new JsonSerializerSettings());
-                        newFileLines.Add(objectString);
+                        throw new ArgumentException($"object '{entry.Id}' does not exist");
                     }
                     else
                     {
-                        newFileLines.Add(i);
+                        await LeftNode.UpdateEntry(entry);
                     }
-                }
 
-                // the below is possibly an issue as it's not async
-                File.Delete(FilePath);
-                await Helpers.WriteAllLinesAsync(FilePath, newFileLines);
-            }
+                    break;
 
-            else
-            {
-                switch (entry.Id.CompareTo(FileId))
-                {
-                    case -1:
-                        if (LeftNode == null)
+                case 1:
+                    if (RightNode == null)
+                    {
+                        throw new ArgumentException($"object '{entry.Id}' does not exist");
+                    }
+                    else
+                    {
+                        await RightNode.UpdateEntry(entry);
+                    }
+
+                    break;
+
+                case 0:
+                    var fileLines = await Helpers.ReadAllLinesAsync(FilePath);
+
+                    var newFileLines = new List<string>();
+                    
+                    foreach (var i in fileLines)
+                    {
+                        // need to only rewrite the section we care about
+                        if (i.Contains(entry.Id.ToString()))
                         {
-                            throw new ArgumentException($"object '{entry.Id}' does not exist");
+                            var nodeObjectString = GetNodeObjectString(i, entry.Id);
+                            var updateObjectString = SerializeObject(entry);
+                            newFileLines.Add(i.Replace(nodeObjectString, updateObjectString));
                         }
                         else
                         {
-                            await LeftNode.UpdateEntry(entry);
+                            newFileLines.Add(i);
                         }
+                    }
 
-                        break;
+                    await Helpers.WriteAllLinesAsync(FilePath, newFileLines, true);
 
-                    case 1:
-                        if (RightNode == null)
-                        {
-                            throw new ArgumentException($"object '{entry.Id}' does not exist");
-                        }
-                        else
-                        {
-                            await RightNode.UpdateEntry(entry);
-                        }
-
-                        break;
-
-                    
-                    
-                    default:
-                        throw new Exception("Oops");
-                }
+                    break;
+                
+                default:
+                    throw new Exception("Oops");
             }
         }
 
@@ -202,7 +194,6 @@ namespace BucketDatabase
 
             foreach (var i in nodeLines)
             {
-                // if the line contains the id -> pull it apart
                 if (i.Contains(entryId.ToString()))
                 {
                     return ParseEntry<T>(i, entryId);
@@ -232,10 +223,54 @@ namespace BucketDatabase
             return default(T);
         }
 
+        public async Task<T> Query<T>(Guid entryId, Guid fileId) where T: IDbEntry
+        {
+            switch (FileId.CompareTo(fileId))
+            {
+                case -1:
+                    if (LeftNode != null)
+                    {
+                        return await LeftNode.Query<T>(entryId, fileId);
+                    }
+                    break;
+                
+                case 1:
+                    if (RightNode != null)
+                    {
+                        return await RightNode.Query<T>(entryId, fileId);
+                    }
+                    break;
+
+                case 0:
+                    var fileLines = await Helpers.ReadAllLinesAsync(FilePath);
+
+                    foreach (var i in fileLines)
+                    {
+                        if (i.Contains(entryId.ToString()))
+                        {
+                            return ParseEntry<T>(i, entryId);
+                        }
+                    }
+                    break;
+
+
+                default:
+                    throw new Exception("oops");
+            }
+
+            return default(T);
+        }
+
         private T ParseEntry<T>(string line, Guid entryId) where T: IDbEntry
         {
             // we are assuming the id is at the start of the string
-            
+            var entryString = GetNodeObjectString(line, entryId);
+
+            return JsonConvert.DeserializeObject<T>(entryString);
+        }
+
+        private string GetNodeObjectString(string line, Guid entryId)
+        {
             var idIndex = line.IndexOf(entryId.ToString());
 
             var entryStartIndex = ParseObjectStartIndex(line, idIndex);
@@ -245,7 +280,7 @@ namespace BucketDatabase
             // the end of the string is relative to the start?
             var entryString = line.Substring(entryStartIndex, entryEndIndex + 1 - entryStartIndex);
 
-            return JsonConvert.DeserializeObject<T>(entryString);
+            return entryString;
         }
 
         private int ParseObjectStartIndex(string line, int idIndex)
@@ -294,6 +329,15 @@ namespace BucketDatabase
             }
 
             return entryEndIndex;
+        }
+
+        private string SerializeObject(IDbEntry entry)
+        {
+            var jsonSettings = new JsonSerializerSettings();
+            jsonSettings.ReferenceLoopHandling = ReferenceLoopHandling.Ignore;
+            var jsonString = JsonConvert.SerializeObject(entry, entry.GetType(), jsonSettings);
+
+            return jsonString;
         }
 
         // private async Task<QueryReturn<T>> QueryQueryable<T>(QueryParameter param) where T: IDbEntry
@@ -420,22 +464,6 @@ namespace BucketDatabase
             return queryableEntries;
         }
 
-        private async Task<IList<IndexEntry>> ReadIndex()
-        {
-            var fileLines = await Helpers.ReadAllLinesAsync(IdIndexFilePath);
-
-            var indexEntries = new List<IndexEntry>();
-
-            foreach (var i in fileLines)
-            {
-                var entry = JsonConvert.DeserializeObject<IndexEntry>(i);
-
-                indexEntries.Add(entry);
-            }
-
-            return indexEntries;
-        }
-
         private async Task<IList<T>> ReadNode<T>() where T: IDbEntry
         {
             var fileLines = await Helpers.ReadAllLinesAsync(FilePath);
@@ -454,16 +482,11 @@ namespace BucketDatabase
 
         private async Task Write(IDbEntry entry)
         {
-            var jsonOptions = new JsonSerializerSettings();
-            jsonOptions.ReferenceLoopHandling = ReferenceLoopHandling.Ignore;
-
-            var objectString = JsonConvert.SerializeObject(entry, entry.GetType(), jsonOptions);
+            var objectString = SerializeObject(entry);
 
             await Helpers.AppendAllTextAsync(FilePath, objectString + Environment.NewLine);
 
             await WriteQueryTerms(entry);
-
-            await WriteIdIndex(entry);
         }
 
         private async Task WriteQueryTerms(IDbEntry entry)
@@ -486,11 +509,5 @@ namespace BucketDatabase
             await Helpers.AppendAllLinesAsync(QueryTermFilePath, termEntries);
         }
 
-        private async Task WriteIdIndex(IDbEntry entry)
-        {
-            var indexEntry = new IndexEntry(entry.Id);
-            var indexEntryString = JsonConvert.SerializeObject(indexEntry);
-            await Helpers.AppendAllTextAsync(IdIndexFilePath, indexEntryString + Environment.NewLine);
-        }
     }
 }
