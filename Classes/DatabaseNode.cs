@@ -23,7 +23,7 @@ namespace BucketDatabase
         private DatabaseNode LeftNode { get; set; }
         internal string NodeRoot { get; }
         private string FilePath { get { return Path.Combine(NodeRoot, $"{FileId.ToString()}.bdb"); } }
-        private string QueryTermFilePath { get { return Path.Combine(NodeRoot, $"QueryTerms.bdb"); } }
+        private string QueryTermFilePath { get { return Path.Combine(NodeRoot, $"Queryables.bdb"); } }
         private string IdIndexFilePath { get { return Path.Combine(NodeRoot, $"Index.bdb"); } }
         public DatabaseNode(string folderPath, int? maxNodeSize = null)
         {
@@ -260,10 +260,70 @@ namespace BucketDatabase
 
             return default(T);
         }
+        public async Task<List<T>> Query<T>(QueryableEntry queryable) where T: IDbEntry
+        {
+            return await Query<T>(new List<QueryableEntry>() { queryable });
+        }
+
+        public async Task<List<T>> Query<T>(ICollection<QueryableEntry> queryables) where T: IDbEntry
+        {
+            var queryableEntries = await ReadQueryables();
+
+            var idsToCheck = new List<Guid>();
+
+            foreach (var i in queryables)
+            {
+                var queryableMatches = queryableEntries.Where(x => x.PropertyName.ToLower() == i.PropertyName.ToLower() && x.PropertyValue.ToLower() == i.PropertyValue.ToLower()).ToList();
+                
+                if (queryableMatches.Count > 0)
+                {
+                    foreach (var j in queryableMatches)
+                    {
+                        idsToCheck.Add(j.Id);
+                    }
+                }
+            }
+
+            var nodeLines = await Helpers.ReadAllLinesAsync(FilePath);
+
+            var matchedEntries = new List<T>();
+
+            foreach (var id in idsToCheck)
+            {
+                var linesToCheck = nodeLines.Where(x => x.Contains(id.ToString()));
+
+                foreach (var line in linesToCheck)
+                {
+                    var entry = ParseEntry<T>(line, id);
+                    matchedEntries.Add(entry);
+                }
+            }
+
+            if (LeftNode != null)
+            {
+                var leftNodeEntries = await LeftNode.Query<T>(queryables);
+
+                if (leftNodeEntries.Count() > 0)
+                {
+                    matchedEntries.AddRange(leftNodeEntries);
+                }
+            }
+
+            if (RightNode != null)
+            {
+                var rightNodeEntries = await RightNode.Query<T>(queryables);
+
+                if (rightNodeEntries.Count() > 0)
+                {
+                    matchedEntries.AddRange(rightNodeEntries);
+                }
+            }
+
+            return matchedEntries;
+        }
 
         private T ParseEntry<T>(string line, Guid entryId) where T: IDbEntry
         {
-            // we are assuming the id is at the start of the string
             var entryString = GetNodeObjectString(line, entryId);
 
             return JsonConvert.DeserializeObject<T>(entryString);
@@ -277,7 +337,6 @@ namespace BucketDatabase
 
             var entryEndIndex = ParseObjectEndIndex(line, entryStartIndex);
 
-            // the end of the string is relative to the start?
             var entryString = line.Substring(entryStartIndex, entryEndIndex + 1 - entryStartIndex);
 
             return entryString;
@@ -340,51 +399,7 @@ namespace BucketDatabase
             return jsonString;
         }
 
-        // private async Task<QueryReturn<T>> QueryQueryable<T>(QueryParameter param) where T: IDbEntry
-        // {
-        //     var queryableEntries = await ReadQueryables();
 
-        //     var idsToCheck = new List<Guid>();
-
-        //     foreach (var i in param.QueryableEntries)
-        //     {
-        //         var queryableMatches = queryableEntries.Where(x => x.PropertyName.ToLower() == i.PropertyName.ToLower() && x.PropertyValue.ToLower() == i.PropertyValue.ToLower()).ToList();
-                
-        //         if (queryableMatches.Count > 0)
-        //         {
-        //             foreach (var j in queryableMatches)
-        //             {
-        //                 idsToCheck.Add(j.Id);
-        //             }
-        //         }
-        //     }
-
-        //     var nodeEntries = await ReadNode<T>();
-
-        //     var matchedEntries = nodeEntries.Where(x => idsToCheck.Contains(x.Id)).ToList();
-
-        //     if (LeftNode != null)
-        //     {
-        //         var leftNodeEntries = await LeftNode.QueryQueryable<T>(param);
-
-        //         if (leftNodeEntries.QueryableMatches.Count() > 0)
-        //         {
-        //             matchedEntries.AddRange(leftNodeEntries.QueryableMatches);
-        //         }
-        //     }
-
-        //     if (RightNode != null)
-        //     {
-        //         var rightNodeEntries = await RightNode.QueryQueryable<T>(param);
-
-        //         if (rightNodeEntries.QueryableMatches.Count() > 0)
-        //         {
-        //             matchedEntries.AddRange(rightNodeEntries.QueryableMatches);
-        //         }
-        //     }
-
-        //     return new QueryReturn<T>() { QueryableMatches = matchedEntries };
-        // }
 
         public async Task<IList<T>> ReadAllNodes<T>() where T: IDbEntry
         {
@@ -486,27 +501,21 @@ namespace BucketDatabase
 
             await Helpers.AppendAllTextAsync(FilePath, objectString + Environment.NewLine);
 
-            await WriteQueryTerms(entry);
+            await WriteQueryables(entry);
         }
 
-        private async Task WriteQueryTerms(IDbEntry entry)
+        private async Task WriteQueryables(IDbEntry entry)
         {
-            var entryProps = entry.GetType().GetProperties();
+            var queryables = entry.PullQueryables();
 
-            var termEntries = new List<string>();
+            var queryableLines = new List<string>();
 
-            foreach (var i in entryProps)
+            foreach (var i in queryables)
             {
-                var attributeDefined = Attribute.IsDefined(i, typeof(QueryableAttribute));
-                if (attributeDefined)
-                {
-                    var queryEntry = new QueryableEntry(i.Name, i.GetValue(entry) == null ? "" : i.GetValue(entry).ToString(), entry.Id);
-                    var queryTermString = JsonConvert.SerializeObject(queryEntry);
-                    termEntries.Add(queryTermString);
-                }
+                queryableLines.Add(JsonConvert.SerializeObject(i));
             }
 
-            await Helpers.AppendAllLinesAsync(QueryTermFilePath, termEntries);
+            await Helpers.AppendAllLinesAsync(QueryTermFilePath, queryableLines);
         }
 
     }

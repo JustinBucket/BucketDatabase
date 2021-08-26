@@ -5,6 +5,8 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using BucketDatabase.Attributes;
+using Newtonsoft.Json;
 
 namespace BucketDatabase
 {
@@ -151,6 +153,48 @@ namespace BucketDatabase
                     }
                 }
             }
+        }
+
+        public static List<QueryableEntry> PullQueryables(this IDbEntry entry)
+        {
+            var entryProps = entry.GetType().GetProperties();
+
+            var termEntries = new List<QueryableEntry>();
+
+            foreach (var i in entryProps)
+            {
+                var attributeDefined = Attribute.IsDefined(i, typeof(QueryableAttribute));
+                if (attributeDefined)
+                {
+                    var queryEntry = new QueryableEntry(i.Name, i.GetValue(entry) == null ? "" : i.GetValue(entry).ToString(), entry.Id);
+                    termEntries.Add(queryEntry);
+                }
+
+                else if (i.PropertyType == typeof(IDbEntry))
+                {
+                    var idbEntryValue = i.GetValue(entry) as IDbEntry;
+
+                    if (idbEntryValue != null)
+                    {
+                        termEntries.AddRange(idbEntryValue.PullQueryables());
+                    }
+                }
+
+                else if (typeof(IEnumerable).IsAssignableFrom(i.PropertyType)) 
+                {
+                    var propertyValue = i.GetValue(entry) as IEnumerable<IDbEntry>;
+
+                    if (propertyValue != null)
+                    {
+                        foreach (var collectionEntry in propertyValue)
+                        {
+                            termEntries.AddRange(collectionEntry.PullQueryables());
+                        }
+                    }
+                }
+            }
+
+            return termEntries;
         }
 
     }
