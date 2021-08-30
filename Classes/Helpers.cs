@@ -6,7 +6,6 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using BucketDatabase.Attributes;
-using Newtonsoft.Json;
 
 namespace BucketDatabase
 {
@@ -85,43 +84,7 @@ namespace BucketDatabase
             await WriteAllLinesAsync(filePath, fileLines);
         }
 
-        public static void CascadeEntryIds(this IDbEntry entry)
-        {
-            var props = entry.GetType().GetProperties();
-
-            foreach (var i in props)
-            {
-                if (i.PropertyType == typeof(IDbEntry))
-                {
-                    // get the value of the property
-                    var propertyValue = i.GetValue(entry) as IDbEntry;
-
-                    if (propertyValue != null)
-                    {
-                        propertyValue.Id = Guid.NewGuid();
-                        // now want to call that property's cascade method
-                        propertyValue.CascadeEntryIds();
-                    }
-                    
-                }
-
-                else if (typeof(IEnumerable).IsAssignableFrom(i.PropertyType))
-                {
-                    var propertyValue = i.GetValue(entry) as IEnumerable<IDbEntry>;
-
-                    if (propertyValue != null)
-                    {
-                        foreach (var collectionEntry in propertyValue)
-                        {
-                            collectionEntry.Id = Guid.NewGuid();
-                            collectionEntry.CascadeEntryIds();
-                        }
-                    }
-                }
-            }
-        }
-
-        public static void CascadeFileIds(this IDbEntry entry)
+        public static void Cascade(this IDbEntry entry)
         {
             var props = entry.GetType().GetProperties();
 
@@ -133,8 +96,10 @@ namespace BucketDatabase
 
                     if (propertyValue != null)
                     {
+                        propertyValue.StateDate = entry.StateDate;
                         propertyValue.FileId = entry.FileId;
-                        propertyValue.CascadeFileIds();
+                        propertyValue.Id = Guid.NewGuid();
+                        propertyValue.Cascade();
                     }
                     
                 }
@@ -147,8 +112,10 @@ namespace BucketDatabase
                     {
                         foreach (var collectionEntry in propertyValue)
                         {
+                            collectionEntry.StateDate = entry.StateDate;
                             collectionEntry.FileId = entry.FileId;
-                            collectionEntry.CascadeFileIds();
+                            collectionEntry.Id = Guid.NewGuid();
+                            collectionEntry.Cascade();
                         }
                     }
                 }

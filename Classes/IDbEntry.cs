@@ -8,5 +8,6 @@ namespace BucketDatabase
     {
         Guid Id { get; set; }
         Guid FileId { get; set; }
+        DateTime StateDate { get; set; }
     }
 }

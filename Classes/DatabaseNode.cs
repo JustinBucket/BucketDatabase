@@ -2,9 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using BucketDatabase.Attributes;
-using System.Text;
 using Newtonsoft.Json;
 
 namespace BucketDatabase
@@ -24,7 +23,6 @@ namespace BucketDatabase
         internal string NodeRoot { get; }
         private string FilePath { get { return Path.Combine(NodeRoot, $"{FileId.ToString()}.bdb"); } }
         private string QueryTermFilePath { get { return Path.Combine(NodeRoot, $"Queryables.bdb"); } }
-        private string IdIndexFilePath { get { return Path.Combine(NodeRoot, $"Index.bdb"); } }
         public DatabaseNode(string folderPath, int? maxNodeSize = null)
         {
             if (maxNodeSize != null)
@@ -52,7 +50,7 @@ namespace BucketDatabase
             }
             else
             {
-                var dbFile = rootFiles.FirstOrDefault(x => x.Contains("Query") == false && x.Contains("Index") == false);
+                var dbFile = rootFiles.FirstOrDefault(x => x.Contains("Queryables") == false);
 
                 FileId = Guid.Parse(Path.GetFileNameWithoutExtension(dbFile));
             }
@@ -70,14 +68,13 @@ namespace BucketDatabase
 
         public async Task WriteEntry(IDbEntry entry)
         {
-            if (entry.Id != Guid.Empty)
+            if (entry.Id != Guid.Empty || entry.FileId != Guid.Empty)
             {
+                // this is firing incorrectly?
                 throw new ArgumentException("entry should not have the id properties pre-populated, if these are pre-existing entries, please use the update method");
             }
 
             entry.Id = Guid.NewGuid();
-
-            entry.CascadeEntryIds();
 
             if (File.Exists(FilePath))
             {
@@ -118,7 +115,8 @@ namespace BucketDatabase
                 else
                 {
                     entry.FileId = FileId;
-                    entry.CascadeFileIds();
+                    entry.StateDate = DateTime.Now;
+                    entry.Cascade();
                     await Write(entry);
                 }
             }
@@ -126,7 +124,8 @@ namespace BucketDatabase
             {
                 FileId = Guid.NewGuid();
                 entry.FileId = FileId;
-                entry.CascadeFileIds();
+                entry.StateDate = DateTime.Now;
+                entry.Cascade();
                 await Write(entry);
             }
         }
@@ -166,12 +165,28 @@ namespace BucketDatabase
                     
                     foreach (var i in fileLines)
                     {
-                        // need to only rewrite the section we care about
                         if (i.Contains(entry.Id.ToString()))
                         {
+                            // also want to check if state date of file matches what we have
                             var nodeObjectString = GetNodeObjectString(i, entry.Id);
+                            var oldStateDate = RetrieveStateDate(nodeObjectString);
+
+                            var stateDateValue = ParseStateDate(oldStateDate);
+
+                            if (entry.StateDate != stateDateValue)
+                            {
+                                throw new ArgumentException("Update object is out of date, requery and apply udpate");
+                            }
+
+                            entry.StateDate = DateTime.Now;
                             var updateObjectString = SerializeObject(entry);
+                            var newStateDate = RetrieveStateDate(updateObjectString);
+
+                            // this should remove the need to cascade the state date
+                            var newFileLine = i.Replace(nodeObjectString, updateObjectString).Replace(oldStateDate, newStateDate);
+
                             newFileLines.Add(i.Replace(nodeObjectString, updateObjectString));
+
                         }
                         else
                         {
@@ -186,6 +201,26 @@ namespace BucketDatabase
                 default:
                     throw new Exception("Oops");
             }
+        }
+
+        private string RetrieveStateDate(string jsonString)
+        {
+            // "StateDate":"2021-08-29T17:11:29.3742529-04:00"
+
+            var reg = new Regex("\"StateDate\":\"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{7}(-|\\+)[0-9]{2}:[0-9]{2}\"");
+
+            var matches = reg.Matches(jsonString);
+
+            return matches[0].Value;
+        }
+
+        private DateTime ParseStateDate(string jsonSection)
+        {
+            var reg = new Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{7}(-|\\+)[0-9]{2}:[0-9]{2}");
+            
+            var stateDateSection = reg.Matches(jsonSection)[0].Value;
+
+            return DateTime.Parse(stateDateSection);
         }
 
         public async Task<T> Query<T>(Guid entryId) where T: IDbEntry
@@ -260,12 +295,12 @@ namespace BucketDatabase
 
             return default(T);
         }
-        public async Task<List<T>> Query<T>(QueryableEntry queryable) where T: IDbEntry
+        public async Task<List<T>> Query<T>(QueryableEntry queryable, bool looseMatch = false) where T: IDbEntry
         {
-            return await Query<T>(new List<QueryableEntry>() { queryable });
+            return await Query<T>(new List<QueryableEntry>() { queryable }, looseMatch);
         }
 
-        public async Task<List<T>> Query<T>(ICollection<QueryableEntry> queryables) where T: IDbEntry
+        public async Task<List<T>> Query<T>(ICollection<QueryableEntry> queryables, bool looseMatch = false) where T: IDbEntry
         {
             var queryableEntries = await ReadQueryables();
 
@@ -273,7 +308,23 @@ namespace BucketDatabase
 
             foreach (var i in queryables)
             {
-                var queryableMatches = queryableEntries.Where(x => x.PropertyName.ToLower() == i.PropertyName.ToLower() && x.PropertyValue.ToLower() == i.PropertyValue.ToLower()).ToList();
+                var queryableMatches = new List<QueryableEntry>();
+                if (looseMatch && !string.IsNullOrWhiteSpace(i.PropertyValue))
+                {
+                    queryableMatches = queryableEntries.Where(x => 
+                        x.PropertyName.ToLower() == i.PropertyName.ToLower() 
+                        && (x.PropertyValue.ToLower().Contains(i.PropertyValue.ToLower()) 
+                            || i.PropertyValue.ToLower().Contains(x.PropertyValue))
+                    ).ToList();
+                }
+                else if (looseMatch == false && !string.IsNullOrWhiteSpace(i.PropertyValue))
+                {
+                    queryableMatches = queryableEntries.Where(x => x.PropertyName.ToLower() == i.PropertyName.ToLower() && x.PropertyValue.ToLower() == i.PropertyValue.ToLower()).ToList();
+                }
+                else
+                {
+                    queryableMatches = queryableEntries.Where(x => x.PropertyName.ToLower() == i.PropertyName.ToLower()).ToList();
+                }
                 
                 if (queryableMatches.Count > 0)
                 {
@@ -290,10 +341,13 @@ namespace BucketDatabase
 
             foreach (var id in idsToCheck)
             {
+                // the same line contains multiple entries -> want both to be retrieved -> but they should be with the below logic?
                 var linesToCheck = nodeLines.Where(x => x.Contains(id.ToString()));
 
                 foreach (var line in linesToCheck)
                 {
+                    // has to be the parse entry causing issues?
+                    // yeah the id we're on is different than the entry we got back
                     var entry = ParseEntry<T>(line, id);
                     matchedEntries.Add(entry);
                 }
@@ -399,8 +453,6 @@ namespace BucketDatabase
             return jsonString;
         }
 
-
-
         public async Task<IList<T>> ReadAllNodes<T>() where T: IDbEntry
         {
             var items = new List<T>();
@@ -498,7 +550,6 @@ namespace BucketDatabase
         private async Task Write(IDbEntry entry)
         {
             var objectString = SerializeObject(entry);
-
             await Helpers.AppendAllTextAsync(FilePath, objectString + Environment.NewLine);
 
             await WriteQueryables(entry);
