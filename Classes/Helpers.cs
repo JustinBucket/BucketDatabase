@@ -96,9 +96,21 @@ namespace BucketDatabase
 
                     if (propertyValue != null)
                     {
-                        propertyValue.StateDate = entry.StateDate;
-                        propertyValue.FileId = entry.FileId;
-                        propertyValue.Id = Guid.NewGuid();
+                        if (propertyValue.StateDate == default(DateTime))
+                        {
+                            propertyValue.StateDate = entry.StateDate;
+                        }
+
+                        if (propertyValue.FileId == Guid.Empty)
+                        {
+                            propertyValue.FileId = entry.FileId;
+                        }
+
+                        if (propertyValue.Id == Guid.Empty)
+                        {
+                            propertyValue.Id = Guid.NewGuid();
+                        }
+
                         propertyValue.Cascade();
                     }
                     
@@ -112,9 +124,21 @@ namespace BucketDatabase
                     {
                         foreach (var collectionEntry in propertyValue)
                         {
-                            collectionEntry.StateDate = entry.StateDate;
-                            collectionEntry.FileId = entry.FileId;
-                            collectionEntry.Id = Guid.NewGuid();
+                            if (collectionEntry.StateDate == default(DateTime))
+                            {
+                                collectionEntry.StateDate = entry.StateDate;
+                            }
+
+                            if (collectionEntry.FileId == Guid.Empty)
+                            {
+                                collectionEntry.FileId = entry.FileId;
+                            }
+
+                            if (collectionEntry.Id == Guid.Empty)
+                            {
+                                collectionEntry.Id = Guid.NewGuid();
+                            }
+                            
                             collectionEntry.Cascade();
                         }
                     }

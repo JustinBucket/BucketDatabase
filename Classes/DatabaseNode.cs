@@ -163,6 +163,8 @@ namespace BucketDatabase
                     var fileLines = await Helpers.ReadAllLinesAsync(FilePath);
 
                     var newFileLines = new List<string>();
+
+                    entry.Cascade();
                     
                     foreach (var i in fileLines)
                     {
@@ -208,9 +210,14 @@ namespace BucketDatabase
         {
             // "StateDate":"2021-08-29T17:11:29.3742529-04:00"
 
-            var reg = new Regex("\"StateDate\":\"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.([0-9]{6}|[0-9]{7})(-|\\+)[0-9]{2}:[0-9]{2}\"");
+            var reg = new Regex("\"StateDate\":\"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]+(-|\\+)[0-9]{2}:[0-9]{2}\"");
 
             var matches = reg.Matches(jsonString);
+
+            if (matches.Count == 0)
+            {
+                throw new ArgumentException($"No matches found in: '{jsonString}'");
+            }
 
             return matches[0].Value;
         }
@@ -219,7 +226,7 @@ namespace BucketDatabase
         {
             /// \b[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\b
             
-            var reg = new Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.([0-9]{6}|[0-9]{7})(-|\\+)[0-9]{2}:[0-9]{2}");
+            var reg = new Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]+(-|\\+)[0-9]{2}:[0-9]{2}");
             
             var stateDateSection = reg.Matches(jsonSection)[0].Value;
 
