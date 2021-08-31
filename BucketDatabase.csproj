@@ -2,8 +2,8 @@
 
   <PropertyGroup>
     <TargetFrameworks>net461;net5.0</TargetFrameworks>
-    <Description>Library related to file-based database system</Description>
-    <Version>1.0.5</Version>
+    <Description>Library related to file-based document database system</Description>
+    <Version>1.0.6</Version>
   </PropertyGroup>
 
   <ItemGroup>
