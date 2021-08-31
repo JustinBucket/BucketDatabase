@@ -70,11 +70,10 @@ namespace BucketDatabase
         {
             if (entry.Id != Guid.Empty || entry.FileId != Guid.Empty)
             {
-                // this is firing incorrectly?
-                throw new ArgumentException("entry should not have the id properties pre-populated, if these are pre-existing entries, please use the update method");
+                throw new ArgumentException("entry should not have the id properties pre-populated, if these are pre-existing entries, please use the update method.");
             }
 
-            entry.Id = Guid.NewGuid();
+            var newGuid = Guid.NewGuid();
 
             if (File.Exists(FilePath))
             {
@@ -82,7 +81,7 @@ namespace BucketDatabase
 
                 if (nodeFileInfo.Length > MaxFileSize)
                 {
-                    switch (entry.Id.CompareTo(FileId))
+                    switch (newGuid.CompareTo(FileId))
                     {
                         case -1 :
                             
@@ -114,6 +113,7 @@ namespace BucketDatabase
                 }
                 else
                 {
+                    entry.Id = newGuid;
                     entry.FileId = FileId;
                     entry.StateDate = DateTime.Now;
                     entry.Cascade();
@@ -122,6 +122,7 @@ namespace BucketDatabase
             }
             else
             {
+                entry.Id = newGuid;
                 FileId = Guid.NewGuid();
                 entry.FileId = FileId;
                 entry.StateDate = DateTime.Now;
@@ -169,7 +170,7 @@ namespace BucketDatabase
                         {
                             // also want to check if state date of file matches what we have
                             var nodeObjectString = GetNodeObjectString(i, entry.Id);
-                            var oldStateDate = RetrieveStateDate(nodeObjectString);
+                            var oldStateDate = RetrieveStateDate(i);
 
                             var stateDateValue = ParseStateDate(oldStateDate);
 
@@ -185,7 +186,7 @@ namespace BucketDatabase
                             // this should remove the need to cascade the state date
                             var newFileLine = i.Replace(nodeObjectString, updateObjectString).Replace(oldStateDate, newStateDate);
 
-                            newFileLines.Add(i.Replace(nodeObjectString, updateObjectString));
+                            newFileLines.Add(newFileLine);
 
                         }
                         else
@@ -207,7 +208,7 @@ namespace BucketDatabase
         {
             // "StateDate":"2021-08-29T17:11:29.3742529-04:00"
 
-            var reg = new Regex("\"StateDate\":\"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{7}(-|\\+)[0-9]{2}:[0-9]{2}\"");
+            var reg = new Regex("\"StateDate\":\"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.([0-9]{6}|[0-9]{7})(-|\\+)[0-9]{2}:[0-9]{2}\"");
 
             var matches = reg.Matches(jsonString);
 
@@ -216,7 +217,9 @@ namespace BucketDatabase
 
         private DateTime ParseStateDate(string jsonSection)
         {
-            var reg = new Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{7}(-|\\+)[0-9]{2}:[0-9]{2}");
+            /// \b[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\b
+            
+            var reg = new Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.([0-9]{6}|[0-9]{7})(-|\\+)[0-9]{2}:[0-9]{2}");
             
             var stateDateSection = reg.Matches(jsonSection)[0].Value;
 
@@ -412,6 +415,7 @@ namespace BucketDatabase
                 if (line[i] == '}')
                 {
                     indicesIndex--;
+                    openParIndices.RemoveAt(openParIndices.Count - 1);
                 }
             }
 
